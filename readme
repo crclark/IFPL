@@ -1,0 +1,3 @@
+Implementing as much of Simon Peyton-Jones' _Implementation of Functional
+Programming Languages_ as I possibly can, starting with enriched lambda
+calculus.

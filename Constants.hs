@@ -27,46 +27,50 @@ data Constant = ConstantApp Constant Constant
                 | BOOL Bool
                 deriving (Show, Read, Eq, Ord)
 
---smallStep does one step of evaluation. To eval completely, use eval.
-smallStep :: Constant -> Constant
+--constantSmallStep does one step of evaluation. To eval completely, use eval.
+constantSmallStep :: Constant -> Constant
 --PLUS base case:
-smallStep (ConstantApp (ConstantApp PLUS (INT x)) (INT y)) = INT $ x+y
+constantSmallStep (ConstantApp (ConstantApp PLUS (INT x)) (INT y)) = INT $ x+y
 --PLUS inductive case:
-smallStep (ConstantApp (ConstantApp PLUS x) y) = ConstantApp (ConstantApp PLUS (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp PLUS x) y) = ConstantApp (ConstantApp PLUS (constantSmallStep x)) (constantSmallStep y)
 --MINUS base case:
-smallStep (ConstantApp (ConstantApp MINUS (INT x)) (INT y)) = INT $ x - y
+constantSmallStep (ConstantApp (ConstantApp MINUS (INT x)) (INT y)) = INT $ x - y
 --MINUS inductive case:
-smallStep (ConstantApp (ConstantApp MINUS x) y) = ConstantApp (ConstantApp MINUS (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp MINUS x) y) = ConstantApp (ConstantApp MINUS (constantSmallStep x)) (constantSmallStep y)
 --MULT base case:
-smallStep (ConstantApp (ConstantApp MULT (INT x)) (INT y)) = INT $ x*y
+constantSmallStep (ConstantApp (ConstantApp MULT (INT x)) (INT y)) = INT $ x*y
 --MULT inductive case:
-smallStep (ConstantApp (ConstantApp MULT x) y) = ConstantApp (ConstantApp MULT (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp MULT x) y) = ConstantApp (ConstantApp MULT (constantSmallStep x)) (constantSmallStep y)
 --DIV base case: 
-smallStep (ConstantApp (ConstantApp DIV (INT x)) (INT y)) = INT $ x `div` y
+constantSmallStep (ConstantApp (ConstantApp DIV (INT x)) (INT y)) = INT $ x `div` y
 --DIV inductive case:
-smallStep (ConstantApp (ConstantApp DIV x) y) = ConstantApp (ConstantApp DIV (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp DIV x) y) = ConstantApp (ConstantApp DIV (constantSmallStep x)) (constantSmallStep y)
 --MOD base case:
-smallStep (ConstantApp (ConstantApp MOD (INT x)) (INT y)) = INT $ x `mod` y
+constantSmallStep (ConstantApp (ConstantApp MOD (INT x)) (INT y)) = INT $ x `mod` y
 --MOD inductive case:
-smallStep (ConstantApp (ConstantApp MOD x) y) = ConstantApp (ConstantApp MOD (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp MOD x) y) = ConstantApp (ConstantApp MOD (constantSmallStep x)) (constantSmallStep y)
 --COND base case:
-smallStep (ConstantApp (ConstantApp (ConstantApp COND (BOOL c)) x) y) = if c then x else y
+constantSmallStep (ConstantApp (ConstantApp (ConstantApp COND (BOOL c)) x) y) = if c then x else y
 --COND inductive case:
-smallStep (ConstantApp (ConstantApp (ConstantApp COND c) y) z) = ConstantApp (ConstantApp (ConstantApp COND (smallStep c)) y) z
+constantSmallStep (ConstantApp (ConstantApp (ConstantApp COND c) y) z) = ConstantApp (ConstantApp (ConstantApp COND (constantSmallStep c)) y) z
 --AND base case:
-smallStep (ConstantApp (ConstantApp AND (BOOL x)) (BOOL y)) = BOOL $ x && y
+constantSmallStep (ConstantApp (ConstantApp AND (BOOL x)) (BOOL y)) = BOOL $ x && y
 --AND inductive case:
-smallStep (ConstantApp (ConstantApp AND x) y) = ConstantApp (ConstantApp AND (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp AND x) y) = ConstantApp (ConstantApp AND (constantSmallStep x)) (constantSmallStep y)
 --OR base case:
-smallStep (ConstantApp (ConstantApp OR (BOOL x)) (BOOL y)) = BOOL $ x || y
+constantSmallStep (ConstantApp (ConstantApp OR (BOOL x)) (BOOL y)) = BOOL $ x || y
 --OR inductive case:
-smallStep (ConstantApp (ConstantApp OR x) y) = ConstantApp (ConstantApp OR (smallStep x)) (smallStep y)
+constantSmallStep (ConstantApp (ConstantApp OR x) y) = ConstantApp (ConstantApp OR (constantSmallStep x)) (constantSmallStep y)
 --NOT base case:
-smallStep (ConstantApp NOT (BOOL x)) = BOOL $ not x
+constantSmallStep (ConstantApp NOT (BOOL x)) = BOOL $ not x
 --NOT inductive case:
-smallStep (ConstantApp NOT x) = ConstantApp NOT (smallStep x)
+constantSmallStep (ConstantApp NOT x) = ConstantApp NOT (constantSmallStep x)
 --basest case!
-smallStep x = x
+constantSmallStep x = x
 
-eval :: Constant -> Constant
-eval = until (\x -> smallStep x == x) smallStep
+constantEval :: Constant -> Constant
+constantEval = until (\x -> constantSmallStep x == x) constantSmallStep
+
+constantNormalForm :: Constant -> Bool
+constantNormalForm (ConstantApp _ _) = False
+constantNormalForm _ = True

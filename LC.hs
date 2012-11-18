@@ -8,8 +8,7 @@ module LC where
 
 import Constants as C
 import Data.List
-
-type Variable = String
+import Variables
 
 data LC = LCConstant C.Constant 
           | LCVar Variable
@@ -35,22 +34,18 @@ boundVars (LCAbs var body) = if elem var (freeVars body)
 
 --one step of leftmost outermost reduction
 smallStep :: LC -> LC
-smallStep (LCConstant c) = LCConstant $ C.smallStep c
+smallStep (LCConstant c) = LCConstant $ constantSmallStep c
 smallStep (LCApp (LCAbs var body) arg) =  sub arg var body --beta reduction! See def of sub below.
 smallStep (LCApp (LCConstant x) (LCConstant y)) = LCConstant $ C.ConstantApp x y
-smallStep (LCApp (LCConstant c) y) = LCApp (LCConstant c) (LC.smallStep y)
-smallStep (LCApp x y) = LCApp (LC.smallStep x) y 
+smallStep (LCApp (LCConstant c) y) = LCApp (LCConstant c) (smallStep y) --todo: test terms with constants more
+smallStep (LCApp x y) = LCApp (smallStep x) y 
 smallStep x = x
 
 --evaluates a term to normal form
 eval :: LC -> LC
 eval = until (\x -> LC.smallStep x == x) LC.smallStep --todo: replace with something faster
 
---infinite supply of variable names, for alpha conversion
-variables :: [Variable] 
-variables = az ++ (concat $ map aznum [1..])
- where az = [[x] | x <- ['a'..'z']]
-       aznum n = map (++ (show n)) az
+
 
 --substitutes LC term m for free occurrences of x in term. Does alpha conversion as necessary.
 sub :: LC -> Variable -> LC -> LC

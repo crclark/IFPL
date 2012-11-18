@@ -3,6 +3,7 @@ Author: Connor Clark
 AST for constant expressions, such as math ops, list ops, etc.
 Also, a shallowly-embedded non-strict evaluator for same.
 Other evaluators to be added later.
+TODO: make AND and OR less strict! Or leave them to be implemented within the language...
 -}
 
 module Constants where

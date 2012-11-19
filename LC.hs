@@ -9,12 +9,26 @@ module LC where
 import Constants as C
 import Data.List
 import Variables
+import Pretty
 
-data LC = LCConstant C.Constant 
+data LC = LCConstant C.Constant
           | LCVar Variable
           | LCApp LC LC
           | LCAbs Variable LC
+          | LCY
+          | LCIf
           deriving (Show, Read, Ord, Eq)
+
+instance Pretty LC where
+ pretty (LCConstant c) = pretty c
+ pretty (LCVar v) = v
+ pretty (LCApp x (LCConstant c)) = pretty x ++ " " ++ pretty c
+ pretty (LCApp abs@(LCAbs _ _) y) = "(" ++ pretty abs ++ ")" ++ pretty y 
+ pretty (LCApp x y) = pretty x ++ " (" ++ pretty y ++ ")"
+ pretty (LCAbs var body) = "\\" ++ var ++ " -> "  ++ pretty body
+ pretty LCY = "Y"
+ pretty LCIf = "COND"
+          
 
 --freeVars returns the free variables in a given lambda calculus term
 freeVars :: LC -> [Variable]
@@ -22,6 +36,8 @@ freeVars (LCConstant c) = []
 freeVars (LCVar x) = [x]
 freeVars (LCApp x y) = nub $ freeVars x ++ freeVars y
 freeVars (LCAbs var body) = delete var $ freeVars body
+freeVars LCY = []
+freeVars LCIf = []
 
 --boundVars returns the bound vars in a given lambda calculus term
 boundVars :: LC -> [Variable]
@@ -35,9 +51,13 @@ boundVars (LCAbs var body) = if elem var (freeVars body)
 --one step of leftmost outermost reduction
 smallStep :: LC -> LC
 smallStep (LCConstant c) = LCConstant $ constantSmallStep c
+smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL True))) y) z) = y
+smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL False))) y) z) = z
+smallStep (LCApp (LCApp (LCApp LCIf x) y) z) = (LCApp (LCApp (LCApp LCIf (smallStep x)) y) z)
 smallStep (LCApp (LCAbs var body) arg) =  sub arg var body --beta reduction! See def of sub below.
 smallStep (LCApp (LCConstant x) (LCConstant y)) = LCConstant $ C.ConstantApp x y
 smallStep (LCApp (LCConstant c) y) = LCApp (LCConstant c) (smallStep y) --todo: test terms with constants more
+smallStep (LCApp LCY x) = LCApp x (LCApp LCY x)
 smallStep (LCApp x y) = LCApp (smallStep x) y 
 smallStep x = x
 
@@ -76,3 +96,14 @@ testTerm3 :: LC
 testTerm3 = LCApp (LCApp (LCConstant C.PLUS) threeTimesFour) sevenTimesEight
  where threeTimesFour = LCApp (LCApp (LCConstant C.MULT) (LCConstant (C.INT 3))) (LCConstant (C.INT 4))
        sevenTimesEight = LCApp (LCApp (LCConstant C.MULT) (LCConstant (C.INT 7))) (LCConstant (C.INT 8))
+
+--implementing factorial with built-in Y combinator:
+testFac = LCApp LCY  $ LCAbs "fac" $ LCAbs "n" $ LCApp (LCApp (LCApp LCIf condition) baseCase) recursiveCase
+  where condition = (LCApp (LCApp (LCConstant C.EQUALS) (LCVar "n")) (LCConstant $ C.INT 0))
+        baseCase = LCConstant $ C.INT 1
+        recursiveCase = LCApp (LCApp (LCConstant C.MULT) (LCVar "n")) (LCApp (LCVar "fac") (LCApp (LCApp (LCConstant C.MINUS) (LCVar "n")) (LCConstant $ C.INT 1))) 
+
+testY = LCApp LCY $ LCAbs "self" $ LCAbs "n" $ LCApp (LCApp (LCApp LCIf condition) baseCase) recursiveCase
+  where condition = (LCApp (LCApp (LCConstant C.EQUALS) (LCVar "n")) (LCConstant $ C.INT 0))
+        baseCase = LCConstant $ C.INT 1
+        recursiveCase = LCApp (LCVar "self") $ LCApp (LCApp (LCConstant C.MINUS) (LCVar "n")) (LCConstant $ C.INT 1)

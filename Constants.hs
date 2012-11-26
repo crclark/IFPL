@@ -30,6 +30,11 @@ data Constant   = ConstantApp Constant Constant
                   | INT Int
                   | CHAR Char
                   | BOOL Bool
+                  | FAIL --for pattern matches
+                  | UNPACK_SUM Int Int --first int is id tag for constructor, second is arity
+                  | PACK_SUM Int Int
+                  | UNPACK_PRODUCT Int --int is arity
+                  | PACK_PRODUCT Int --todo: not that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
                      deriving (Show, Read, Eq, Ord)
 
 --constantSmallStep does one step of evaluation. To eval completely, use eval.
@@ -99,3 +104,8 @@ instance Pretty Constant where
  pretty (INT x) = show x
  pretty (CHAR x) = show x
  pretty (BOOL x) = show x
+ pretty (FAIL) = "FAIL"
+ pretty (UNPACK_SUM x y) = "UNPACK_SUM-" ++ show x ++ "-" ++ show y
+ pretty (PACK_SUM x y) = "PACK_SUM-" ++ show x ++ "-" ++ show y 
+ pretty (UNPACK_PRODUCT x) = "UNPACK_PRODUCT-" ++ show x
+ pretty (PACK_PRODUCT x) = "PACK_PRODUCT-" ++ show x

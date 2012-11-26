@@ -42,6 +42,7 @@ translate' (LC.LCVar v) = TransVar v
 translate' (LC.LCIf) = TransIf
 translate' (LC.LCY) = TransY
 
+--The algorithm in IFPL is untyped, so this hack is needed so that abstract can work on both types.
 class Abstractable a where
  abstract :: Variable -> a -> Trans
  

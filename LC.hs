@@ -17,6 +17,7 @@ data LC = LCConstant C.Constant
           | LCAbs Variable LC
           | LCY
           | LCIf
+          | LCADT Int [LC] --todo: consider replacing this with Church-encoded data structures, just because that's more fun.
           deriving (Show, Read, Ord, Eq)
 
 instance Pretty LC where
@@ -50,15 +51,69 @@ boundVars (LCAbs var body) = if elem var (freeVars body)
 
 --one step of leftmost outermost reduction
 smallStep :: LC -> LC
+
+--reduce constant expressions:
 smallStep (LCConstant c) = LCConstant $ constantSmallStep c
+
+--reduce conditionals starting with Bools:
 smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL True))) y) z) = y
 smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL False))) y) z) = z
+--otherwise, a conditional needs to evaluate its if-term:
 smallStep (LCApp (LCApp (LCApp LCIf x) y) z) = (LCApp (LCApp (LCApp LCIf (smallStep x)) y) z)
+
+--actual beta reduction:
 smallStep (LCApp (LCAbs var body) arg) =  sub arg var body --beta reduction! See def of sub below.
+
+--Unpacks a sum type and applies the given function to its innards:
+smallStep (LCApp 
+                (LCApp (LCConstant (C.UNPACK_SUM x arity)) f) 
+                (LCADT y zs)) = if x == y --check that the right constructor has been used
+                                   then foldl1 LCApp (f:zs) --if so, apply
+                                   else LCConstant C.FAIL --otherwise, go to the next pattern match
+--recursive case: evaluate arg far enough to pattern match on it:
+smallStep (LCApp 
+                left@(LCApp (LCConstant (C.UNPACK_SUM x arity)) f)
+                nonADT) = LCApp left (smallStep nonADT)
+                                   
+--Unpacks a product type and applies the given function to its innards:
+smallStep (LCApp 
+                (LCApp (LCConstant (C.UNPACK_PRODUCT arity)) f) 
+                (LCADT _ zs)) = foldl1 LCApp (f:zs)
+--recursive case: evaluate argument enough to pattern match on it:
+smallStep (LCApp
+                left@(LCApp (LCConstant (C.UNPACK_PRODUCT arity)) f)
+                nonADT) = LCApp left (smallStep nonADT)
+
+--packs a sum type. The arity field is decremented each time PACK_SUM is partially applied.
+--That keeps track of when to finish packing.
+smallStep (LCApp 
+                (LCApp (LCConstant (C.PACK_SUM d0 arity)) (LCADT d1 xs)) 
+                term) = if arity > 1 
+                           then LCApp (LCConstant (C.PACK_SUM d0 (arity - 1))) (LCADT d1 (xs ++ [term]))
+                           else LCADT d1 (xs ++ [term])
+                           
+--first step of packing. No partially applied ADT present yet.
+smallStep (LCApp (LCConstant (C.PACK_SUM d arity)) term) = LCApp (LCConstant (C.PACK_SUM d (arity - 1))) (LCADT d [term])
+
+--analogous packing steps for product types
+smallStep (LCApp (LCApp (LCConstant (C.PACK_PRODUCT arity)) (LCADT _ xs)) term) = if arity > 1 
+                                                                                        then LCApp (LCConstant (C.PACK_PRODUCT (arity - 1))) (LCADT (-1) (xs ++ [term]))
+                                                                                        else LCADT (-1) (xs ++ [term])
+smallStep (LCApp (LCConstant (C.PACK_PRODUCT arity)) term) = LCApp (LCConstant (C.PACK_PRODUCT (arity - 1))) (LCADT (-1) [term])
+
+--A constant applied to a constant is turned into a "Constant Application" so that it can be evaluated by the separate eval function for constant expressions.
 smallStep (LCApp (LCConstant x) (LCConstant y)) = LCConstant $ C.ConstantApp x y
+
+--inductive case for constants
 smallStep (LCApp (LCConstant c) y) = LCApp (LCConstant c) (smallStep y) --todo: test terms with constants more
+
+--Built-in fixpoint combinator implementation
 smallStep (LCApp LCY x) = LCApp x (LCApp LCY x)
+
+--leftmost rule
 smallStep (LCApp x y) = LCApp (smallStep x) y 
+
+--stuck terms
 smallStep x = x
 
 --evaluates a term to normal form

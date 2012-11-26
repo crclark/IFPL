@@ -48,18 +48,31 @@ type TypeName = [Char]
 
 type Arity = Int
 
+type Tag = Int --stores constructor tags (for identifying sum constructors)
+
 --ConstructorInfo stores a list of type names, paired with their constructors and the 
 --constructors' arities.
-type ConstructorInfo = [(TypeName, [(Constructor, Arity)])] 
+type ConstructorInfo = [(TypeName, [(Constructor, (Tag, Arity))])] 
 
 --ConstructorTags stores the tag id of each constructor for sum types.
 --This allows sum constructors of the same arity and type to be differentiated.
+--if the constructor is for a product, the tag will be -1
 type ConstructorTags = [(Constructor, Int)]
+
+--gets tag of a given constructor
+tag :: ConstructorInfo -> Constructor -> Int
+tag info c = case lookup c (join (map snd info)) of
+             Just (t, a) -> t
+             Nothing -> error "Tried to get tag of non-existent constructor"
+
+--true iff constructor is of a sum type
+isSum :: ConstructorInfo -> Constructor -> Bool
+isSum info c = if tag info c == -1 then False else True
 
 --looks up the arity of a constructor
 arity :: ConstructorInfo -> Constructor -> Arity
 arity info constructor = case (lookup constructor (join (map snd info))) of
-                         Just x -> x
+                         Just (t, a) -> t
                          Nothing -> error "Unknown constructor referenced in pattern match"
 
 --todo: verify that two types can't share a constructor name in legal Haskell/Miranda/whatever
@@ -150,17 +163,69 @@ sub m x t = t --catch-all for constant expressions
 
 
 --translation function from ELC to LC. todo: finish
-translate :: ELC -> LC
-translate (ELCConstant c) = LCConstant c
-translate (ELCVar v) = LCVar v
-translate (ELCApp x y) = LCApp (translate x) (translate y)
-translate (ELCAbs pat body) = undefined --todo: define
-translate (ELCLet (PatternVar v) x y) = LCApp (LCAbs v (translate y)) (translate x)
-translate (ELCLet pat x y) = undefined --todo: handle other pattern cases
-translate (ELCLetRec bindings t) = undefined --todo
-translate (ELCFatBar x y) = undefined --todo
-translate (ELCCase var cases) = undefined --todo
-translate (ELCIf) = LCIf
+translate :: ConstructorInfo -> ELC -> LC
+translate i (ELCConstant c) = LCConstant c
+translate i (ELCVar v) = LCVar v
+translate i (ELCApp x y) = LCApp (translate i x) (translate i y)
+--Cases for pattern-matching lambda abstractions:
+translate i (ELCAbs (PatternConstant k) body) = LCAbs newVar $ LCApp (LCApp (LCApp LCIf (LCApp (LCApp (LCConstant C.EQUALS) (LCConstant k)) (LCVar "v"))) (translate i body)) (LCConstant C.FAIL)
+                                                 where newVar = head $ variables \\ freeVarsELC body
+translate i (ELCAbs (PatternConstructor c pats) body) = if isSum i c 
+                                                         then LCApp (LCConstant (C.UNPACK_SUM (tag i c) (arity i c))) $ translate i $ foldr ELCAbs body pats
+                                                         else LCApp (LCConstant (C.UNPACK_PRODUCT (arity i c))) $ translate i $ foldr ELCAbs body pats
+--todo: Not sure what the line below does or where it came from, but not deleting it until I remember.
+--translate i (ELCLet (PatternVar v) x y) = LCApp (LCAbs v (translate i y)) (translate i x)
+translate i (ELCAbs (PatternVar v) b) = LCAbs v $ translate i b
+translate i (ELCLet pat x y) = undefined --todo: handle other pattern cases
+translate i (ELCLetRec bindings t) = undefined --todo
+translate i (ELCFatBar x y) = undefined --todo
+translate i (ELCCase var cases) = undefined --todo
+translate i (ELCIf) = LCIf
+
+varsInPattern :: Pattern -> [Variable]
+varsInPattern (PatternConstant _) = []
+varsInPattern (PatternVar v) = [v]
+varsInPattern (PatternConstructor c ps) = concatMap varsInPattern ps
+
+--data Clause = CLAUSE Constructor [Variable] ELC
+freeVarsInClause :: Clause -> [Variable]
+freeVarsInClause (CLAUSE c vs t) = freeVarsELC t \\ vs
+
+boundVarsInClause :: Clause -> [Variable]
+boundVarsInClause (CLAUSE c vs t) = nub $ [v | v <- vs, elem v (freeVarsELC t)] ++ boundVarsELC t
+
+--ELCELCELCfreeVars returns the free variables in a given ELC term
+freeVarsELC :: ELC -> [Variable]
+freeVarsELC (ELCConstant c) = []
+freeVarsELC (ELCVar x) = [x]
+freeVarsELC (ELCApp x y) = nub $ freeVarsELC x ++ freeVarsELC y
+freeVarsELC (ELCAbs pat body) = freeVarsELC body \\ varsInPattern pat
+freeVarsELC (ELCLet pat binding term) = nub (freeVarsELC binding ++ freeVarsELC term) \\ varsInPattern pat
+--todo: if a variable is bound in one of a letrec's patterns, is it bound to that value in all of the terms being bound by that letrec?
+freeVarsELC (ELCLetRec bindings term) = nub (freeVarsInBindings ++ freeVarsELC term) \\ patternBoundVars
+                                         where pats = map fst bindings
+                                               bs = map snd bindings
+                                               patternBoundVars = concatMap varsInPattern pats
+                                               freeVarsInBindings = concat $ zipWith (\p b -> freeVarsELC b \\ varsInPattern p) pats bs 
+freeVarsELC (ELCFatBar x y) = nub $ freeVarsELC x ++ freeVarsELC y
+freeVarsELC (ELCCase v cs) = nub (concatMap freeVarsInClause cs) \\ [v]
+freeVarsELC ELCIf = []
+
+
+--boundVarsELC returns the bound vars in a given ELC term
+boundVarsELC :: ELC -> [Variable]
+boundVarsELC (ELCConstant c) = []
+boundVarsELC (ELCVar x) = []
+boundVarsELC (ELCApp x y) = nub $ boundVarsELC x ++ boundVarsELC y
+boundVarsELC (ELCAbs pat body) = nub $ [v | v <- (varsInPattern pat), elem v (freeVarsELC body)] ++ boundVarsELC body
+boundVarsELC (ELCLet pat b t) = boundVarsELC (ELCAbs pat t) ++ boundVarsELC b
+boundVarsELC (ELCLetRec bindings t) = nub $ [v | v <- patternVars, elem v (freeVarsELC t)] ++ concatMap boundVarsELC bs
+                             where ps = map fst bindings
+                                   bs = map snd bindings
+                                   patternVars = concatMap varsInPattern ps  
+boundVarsELC (ELCFatBar x y) = nub $ boundVarsELC x ++ boundVarsELC y
+boundVarsELC (ELCCase v cs) = concatMap boundVarsInClause cs  
+boundVarsELC ELCIf = []
 
 
 -----------------MATCH TEST---------------------------
@@ -171,7 +236,7 @@ mappairs f (x:xs) (y:ys) = f x y : mappairs f xs ys
 -}
 
 testInfo :: ConstructorInfo
-testInfo = [("List", [("Cons", 2), ("Nil",0)])]
+testInfo = [("List", [("Cons",(0, 2)), ("Nil",(1,0))])]
 
 testUs :: [Variable]
 testUs = ["_u1", "_u2", "_u3"]

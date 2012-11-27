@@ -10,6 +10,9 @@ import Constants as C
 import LC 
 import Data.List hiding (partition)
 import Control.Monad
+import Digraph --need to "sudo ghc-pkg expose ghc" for this to compile, now.
+import Data.Hashable
+import Data.Maybe (fromJust)
 
 --abstract syntax for Enriched Lambda Calculus
 data ELC = ELCConstant C.Constant 
@@ -23,6 +26,9 @@ data ELC = ELCConstant C.Constant
            | ELCIf --built-in if statement
             deriving (Show, Read, Ord, Eq)
 
+instance Hashable ELC where
+ hash = hash . show
+
 --a Clause is a branch of a case statement, consisting of a constructor, variables to bind to the
 --arguments of the constructor, and an ELC to evaluate.
 data Clause = CLAUSE Constructor [Variable] ELC
@@ -33,6 +39,9 @@ data Pattern = PatternConstant C.Constant --e.g. fac 0 = 1 todo: implement suppo
                | PatternVar Variable      --e.g. id x = x
                | PatternConstructor Constructor [Pattern] --e.g. head (x:xs) = x
                 deriving (Show, Read, Ord, Eq)
+
+instance Hashable Pattern where
+ hash = hash . show
 
 --an equation is a pattern-matched ELC expression. 
 --e.g. left (Tree l r) = l, except without the identifier "left".
@@ -94,6 +103,13 @@ getCon (PatternConstructor c ps' : ps, e) = c
 makeVar :: Int -> Variable
 makeVar k = "_u" ++ show k
 
+irrefutable :: ConstructorInfo -> Pattern -> Bool
+irrefutable _ (PatternVar v) = True
+irrefutable _ (PatternConstant c) = False
+irrefutable i (PatternConstructor c ps) = if not (isSum i c) && and (map (irrefutable i) ps) 
+                                             then True
+                                             else False
+
 --match internals
 partition :: Eq b => (a -> b) -> [a] -> [[a]]
 partition f [] = []
@@ -146,21 +162,6 @@ subst ELCIf _ _ = ELCIf
 --internal for subst. todo: use a where statement or something.
 substC :: Clause -> Variable -> Variable -> Clause
 substC (CLAUSE constructor vars t) var1 var2 = CLAUSE constructor (map (\x -> if x == var2 then var1 else x) vars) (subst t var1 var2) 
-
-{- --todo: the book wants subst:: ELC -> Variable -> Variable -> ELC, but not sure if they want to worry about shadowing or not. Will figure it out later
-sub :: ELC -> Variable -> ELC -> ELC
-sub m x (LCVar z) = if z == x then m else (LCVar z)
-sub m x (LCApp e f) = LCApp (sub m x e) (sub m x f)
-sub m x (LCAbs y body) = if x == y 
-                              then LCAbs y body 
-                              else if not (x `elem` (freeVars body)) || not (y `elem` (freeVars m))
-                                      then LCAbs y (sub m x body)
-                                      else LCAbs z (sub m x (sub (LCVar z) y body))
-                                           where z = head unusedVars
-                                                     where unusedVars = (variables \\ ((freeVars body) ++ (freeVars m)))
-sub m x t = t --catch-all for constant expressions
--}
-
 
 --translation function from ELC to LC. todo: finish
 translate :: ConstructorInfo -> ELC -> LC
@@ -227,6 +228,48 @@ boundVarsELC (ELCFatBar x y) = nub $ boundVarsELC x ++ boundVarsELC y
 boundVarsELC (ELCCase v cs) = concatMap boundVarsInClause cs  
 boundVarsELC ELCIf = []
 
+--dependency analysis takes an expression with letrecs and transforms it
+--so as to keep only the essential letrecs, converting the other letrecs to lets, and puts the
+--let(rec)s in the optimal order to express only actual mutual recursion.
+dependencyAnalysis :: ELC -> ELC
+dependencyAnalysis (ELCLetRec bindings term) = generateSortedLets (topoSortedSCCs $ constructDigraph bindings) term
+dependencyAnalysis _ = error "called dependencyAnalysis on non-letrec term"
+
+constructDigraph :: [(Pattern, ELC)] -> Graph ( (Pattern, ELC), Int)
+constructDigraph bindings = graphFromVerticesAndAdjacency vertices edges
+                            where ps = map fst bindings
+                                  bs = map snd bindings
+                                  vertices = [(binding, hash binding) | binding <- bindings]
+                                  edges = [(hash binding, out) | binding <- bindings, out <- (outEdges binding)] 
+                                   where varsToHashes = concatMap varsToHash bindings --keyed collection of variable names to the binding they are bound in
+                                         varsToHash binding@(pat, elc) = [(var, hash binding)| var <- varsInPattern pat]  
+                                         outEdges binding@(pat, elc) = map fromJust $ map ((flip lookup) varsToHashes) $ (freeVarsELC elc :: [Variable])
+
+--topologically sorted strongly connected components of the graph, as a list of lists.
+--later elements depend on earlier ones. Thus, the first ones should be in the outermost let.
+topoSortedSCCs :: Graph ((Pattern, ELC), Int) -> [[(Pattern,ELC)]]
+topoSortedSCCs g = map (map fst) $ map flattenSCC $ stronglyConnCompG g
+
+--generateSortedLets takes the output of topoSortedSCCs, and an innermost expression, and
+--generates nested let(rec) statements that are in order of their inter-dependencies
+generateSortedLets :: [[(Pattern, ELC)]] -> ELC -> ELC
+generateSortedLets [] base = base
+generateSortedLets (b:bs) base = if length b == 1 
+                                    then let [(pat, elc)] = b in
+                                             ELCLet pat elc (generateSortedLets bs base)
+                                    else ELCLetRec b (generateSortedLets bs base) 
+
+----------------DEPENDENCY ANALYSIS TEST----------------
+depTest :: ELC
+depTest = ELCLetRec [ (PatternVar "a", ELCConstant C.PLUS),
+                      (PatternVar "b", ELCVar "a" ),
+                      (PatternVar "c", ELCApp (ELCApp (ELCVar "h") (ELCVar "b")) (ELCVar "d") ),
+                      (PatternVar "d", ELCVar "c"),
+                      (PatternVar "f", ELCApp (ELCApp (ELCVar "g") (ELCVar "h")) (ELCVar "a") ),
+                      (PatternVar "g", ELCVar "f"),
+                      (PatternVar "h", ELCVar "g")
+                    ] 
+                    (ELCApp (ELCVar "c") (ELCVar "h"))
 
 -----------------MATCH TEST---------------------------
 {-This is a representation of the following function:

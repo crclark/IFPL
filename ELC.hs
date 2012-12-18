@@ -193,13 +193,20 @@ translateInternal i (ELCY) = LCY
 
 --translates case expressions
 --CLAUSE Constructor [Variable] ELC
+--todo: test with example on p. 123
 translateCase :: ConstructorInfo -> ELC -> LC
-translateCase i (ELCCase var cases) = if productCase i cases 
-                                         then let [CLAUSE c vs body] = cases 
-                                                   --todo: scary recursion here with translate use. If this loops forever, change
-                                                  in translate i $ ELCApp (ELCApp (ELCConstant $ C.UNPACK_PRODUCT (arity i c)) (foldr ELCAbs body (map PatternVar vs))) (ELCVar var)
-                                         else undefined --todo: finish
+translateCase i t@(ELCCase var cases) = if productCase i cases 
+                                           then let [CLAUSE c vs body] = cases 
+                                                     --todo: scary recursion here with translate use. If this loops forever, change
+                                                      in translate i $ ELCApp (ELCApp (ELCConstant $ C.UNPACK_PRODUCT (arity i c)) (foldr ELCAbs body (map PatternVar vs))) (ELCVar var)
+                                           else translate i $ toCaseT i $ sortCases i t 
 
+toCaseT :: ConstructorInfo -> ELC -> ELC
+toCaseT i (ELCCase var cases) = foldl1 ELCApp $ [ELCConstant C.CASE_T, ELCVar var] ++ 
+                                                [ELCApp (ELCApp (ELCConstant $ C.UNPACK_SUM (tag i c) (arity i c)) (foldr ELCAbs body (map PatternVar vs))) (ELCVar var) 
+                                                 | (CLAUSE c vs body) <- cases]
+
+sortCases :: ConstructorInfo -> ELC -> ELC
 sortCases i (ELCCase var cases) = ELCCase var (sortBy (comparing (clauseSumId i)) cases)
 
 --helper function for sorting clauses in a case expression into order

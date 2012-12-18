@@ -43,7 +43,9 @@ data Constant   = ConstantApp Constant Constant
 --constantSmallStep does one step of evaluation. To eval completely, use eval.
 constantSmallStep :: Constant -> Constant
 --EQUALS-- base case:
-constantSmallStep (ConstantApp (ConstantApp EQUALS x) y) = if constantNormalForm x && constantNormalForm y then BOOL $ x == y else (ConstantApp (ConstantApp EQUALS (constantSmallStep x)) (constantSmallStep y))
+constantSmallStep (ConstantApp (ConstantApp EQUALS x) y) = if constantNormalForm x && constantNormalForm y 
+                                                              then BOOL $ x == y 
+                                                              else ConstantApp (ConstantApp EQUALS (constantSmallStep x)) (constantSmallStep y)
 --PLUS base case:
 constantSmallStep (ConstantApp (ConstantApp PLUS (INT x)) (INT y)) = INT $ x+y
 --PLUS inductive case:

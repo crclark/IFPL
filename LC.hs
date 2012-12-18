@@ -45,8 +45,8 @@ boundVars :: LC -> [Variable]
 boundVars (LCConstant c) = []
 boundVars (LCVar x) = []
 boundVars (LCApp x y) = nub $ boundVars x ++ boundVars y
-boundVars (LCAbs var body) = if elem var (freeVars body) 
-                                then var : (boundVars body)
+boundVars (LCAbs var body) = if var `elem` (freeVars body) 
+                                then var : boundVars body
                                 else boundVars body
 
 --one step of leftmost outermost reduction
@@ -59,7 +59,7 @@ smallStep (LCConstant c) = LCConstant $ constantSmallStep c
 smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL True))) y) z) = y
 smallStep (LCApp (LCApp (LCApp LCIf (LCConstant (C.BOOL False))) y) z) = z
 --otherwise, a conditional needs to evaluate its if-term:
-smallStep (LCApp (LCApp (LCApp LCIf x) y) z) = (LCApp (LCApp (LCApp LCIf (smallStep x)) y) z)
+smallStep (LCApp (LCApp (LCApp LCIf x) y) z) = LCApp (LCApp (LCApp LCIf (smallStep x)) y) z
 
 --actual beta reduction:
 smallStep (LCApp (LCAbs var body) arg) =  sub arg var body --beta reduction! See def of sub below.
@@ -124,15 +124,13 @@ eval = until (\x -> LC.smallStep x == x) LC.smallStep --todo: replace with somet
 
 --substitutes LC term m for free occurrences of x in term. Does alpha conversion as necessary.
 sub :: LC -> Variable -> LC -> LC
-sub m x (LCVar z) = if z == x then m else (LCVar z)
+sub m x (LCVar z) = if z == x then m else LCVar z
 sub m x (LCApp e f) = LCApp (sub m x e) (sub m x f)
-sub m x (LCAbs y body) = if x == y 
-                              then LCAbs y body 
-                              else if not (x `elem` (freeVars body)) || not (y `elem` (freeVars m))
-                                      then LCAbs y (sub m x body)
-                                      else LCAbs z (sub m x (sub (LCVar z) y body))
-                                           where z = head unusedVars
-                                                     where unusedVars = (variables \\ ((freeVars body) ++ (freeVars m)))
+sub m x (LCAbs y body) | x == y = LCAbs y body 
+                       | notElem x (freeVars body) || notElem y (freeVars m) = LCAbs y (sub m x body)
+                       | otherwise = LCAbs z (sub m x (sub (LCVar z) y body))
+                            where z = head unusedVars
+                                        where unusedVars = variables \\ (freeVars body ++ freeVars m)
 sub m x t = t --catch-all for constant expressions
 
 --this term does not evaluate to a value

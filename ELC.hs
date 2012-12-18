@@ -54,9 +54,9 @@ type Equation = ([Pattern], ELC)
 
 
 --The stuff below is for translating pattern matching into FATBAR equivalents.
-type Constructor = [Char] 
+type Constructor = String
 
-type TypeName = [Char]
+type TypeName = String
 
 type Arity = Int
 
@@ -79,18 +79,18 @@ tag info c = case lookup c (join (map snd info)) of
 
 --true iff constructor is of a sum type
 isSum :: ConstructorInfo -> Constructor -> Bool
-isSum info c = if tag info c == -1 then False else True
+isSum info c = not $ tag info c == -1
 
 --looks up the arity of a constructor
 arity :: ConstructorInfo -> Constructor -> Arity
-arity info constructor = case (lookup constructor (join (map snd info))) of
+arity info constructor = case lookup constructor (join (map snd info)) of
                          Just (t, a) -> t
                          Nothing -> error $ "Unknown constructor referenced in pattern match: " ++ constructor
 
 --todo: verify that two types can't share a constructor name in legal Haskell/Miranda/whatever
 --otherConstructors returns a list of all constructors of a type, given the name of one of its constructors
 otherConstructors :: ConstructorInfo -> Constructor -> [Constructor]
-otherConstructors info constructor = let constructorLists = (map (map fst) (map snd info))
+otherConstructors info constructor = let constructorLists = (map (map fst . snd) info)
                                          in join $ filter (elem constructor) constructorLists
                 
 isVar :: Equation -> Bool
@@ -109,9 +109,7 @@ makeVar k = "_u" ++ show k
 irrefutable :: ConstructorInfo -> Pattern -> Bool
 irrefutable _ (PatternVar v) = True
 irrefutable _ (PatternConstant c) = False
-irrefutable i (PatternConstructor c ps) = if not (isSum i c) && and (map (irrefutable i) ps) 
-                                             then True
-                                             else False
+irrefutable i (PatternConstructor c ps) = not (isSum i c) && all (irrefutable i) ps 
 
 --match internals
 partition :: Eq b => (a -> b) -> [a] -> [[a]]
@@ -151,7 +149,7 @@ match k (u:us) qs def info = foldr (matchVarCon k (u:us) info) def (partition is
 --in the expression ELC, substitute var1 for var2 --todo: what about bound vars? ignore? Book not helpful.
 subst :: ELC -> Variable -> Variable -> ELC
 subst (ELCConstant c) var1 var2 = ELCConstant c 
-subst (ELCVar var) var1 var2 = if var == var2 then ELCVar var1 else ELCVar var
+subst (ELCVar var) var1 var2 = ELCVar $ if var == var2 then var1 else var
 subst (ELCApp l r) var1 var2 = ELCApp (subst l var1 var2) (subst r var1 var2)
 subst (ELCAbs pat t) var1 var2 = ELCAbs pat (subst t var1 var2) --todo: sub inside pattern?
 subst (ELCLet pat t1 t2) var1 var2 = ELCLet pat (subst t1 var1 var2) (subst t2 var1 var2)--todo: both sides of let? pattern? 
@@ -168,7 +166,7 @@ substC (CLAUSE constructor vars t) var1 var2 = CLAUSE constructor (map (\x -> if
 
 --translation function from ELC to LC. todo: finish
 translate :: ConstructorInfo -> ELC -> LC
-translate i = (translateInternal i) . (simplifyAllLets i)
+translate i = translateInternal i . simplifyAllLets i
 
 --translateInternal handles the steps of translation AFTER simplification of let statements
 translateInternal :: ConstructorInfo -> ELC -> LC 
@@ -187,7 +185,7 @@ translateInternal i (ELCAbs (PatternVar v) b) = LCAbs v $ translateInternal i b
 translateInternal i (ELCLet pat x y) = error "non-simple let encountered after simplifyAllLets!"
 translateInternal i (ELCLetRec bindings t) = error "letrec encountered after simplifyAllLets!"
 translateInternal i (ELCFatBar x y) = undefined --todo
-translateInternal i t@(ELCCase var cases) = translateCase i t --todo
+translateInternal i t@(ELCCase var cases) = translateCase i t 
 translateInternal i (ELCIf) = LCIf
 translateInternal i (ELCY) = LCY
 
@@ -198,12 +196,12 @@ translateCase :: ConstructorInfo -> ELC -> LC
 translateCase i t@(ELCCase var cases) = if productCase i cases 
                                            then let [CLAUSE c vs body] = cases 
                                                      --todo: scary recursion here with translate use. If this loops forever, change
-                                                      in translate i $ ELCApp (ELCApp (ELCConstant $ C.UNPACK_PRODUCT (arity i c)) (foldr ELCAbs body (map PatternVar vs))) (ELCVar var)
+                                                      in translate i $ ELCApp (ELCApp (ELCConstant $ C.UNPACK_PRODUCT (arity i c)) (foldr (ELCAbs . PatternVar) body vs)) (ELCVar var)
                                            else translate i $ toCaseT i $ sortCases i t 
 
 toCaseT :: ConstructorInfo -> ELC -> ELC
 toCaseT i (ELCCase var cases) = foldl1 ELCApp $ [ELCConstant C.CASE_T, ELCVar var] ++ 
-                                                [ELCApp (ELCApp (ELCConstant $ C.UNPACK_SUM (tag i c) (arity i c)) (foldr ELCAbs body (map PatternVar vs))) (ELCVar var) 
+                                                [ELCApp (ELCApp (ELCConstant $ C.UNPACK_SUM (tag i c) (arity i c)) (foldr (ELCAbs . PatternVar) body vs)) (ELCVar var) 
                                                  | (CLAUSE c vs body) <- cases]
 
 sortCases :: ConstructorInfo -> ELC -> ELC
@@ -226,7 +224,7 @@ freeVarsInClause :: Clause -> [Variable]
 freeVarsInClause (CLAUSE c vs t) = freeVarsELC t \\ vs
 
 boundVarsInClause :: Clause -> [Variable]
-boundVarsInClause (CLAUSE c vs t) = nub $ [v | v <- vs, elem v (freeVarsELC t)] ++ boundVarsELC t
+boundVarsInClause (CLAUSE c vs t) = nub $ [v | v <- vs, v `elem` (freeVarsELC t)] ++ boundVarsELC t
 
 --ELCELCELCfreeVars returns the free variables in a given ELC term
 freeVarsELC :: ELC -> [Variable]
@@ -251,9 +249,9 @@ boundVarsELC :: ELC -> [Variable]
 boundVarsELC (ELCConstant c) = []
 boundVarsELC (ELCVar x) = []
 boundVarsELC (ELCApp x y) = nub $ boundVarsELC x ++ boundVarsELC y
-boundVarsELC (ELCAbs pat body) = nub $ [v | v <- (varsInPattern pat), elem v (freeVarsELC body)] ++ boundVarsELC body
+boundVarsELC (ELCAbs pat body) = nub $ [v | v <- varsInPattern pat, v `elem` (freeVarsELC body)] ++ boundVarsELC body
 boundVarsELC (ELCLet pat b t) = boundVarsELC (ELCAbs pat t) ++ boundVarsELC b
-boundVarsELC (ELCLetRec bindings t) = nub $ [v | v <- patternVars, elem v (freeVarsELC t)] ++ concatMap boundVarsELC bs
+boundVarsELC (ELCLetRec bindings t) = nub $ [v | v <- patternVars, v `elem` (freeVarsELC t)] ++ concatMap boundVarsELC bs
                              where ps = map fst bindings
                                    bs = map snd bindings
                                    patternVars = concatMap varsInPattern ps  
@@ -272,17 +270,15 @@ simplifyAllLetsInternal i (ELCAbs pat body) = ELCAbs pat (simplifyAllLetsInterna
 simplifyAllLetsInternal i (ELCLet pat bind body) = if irrefutable i pat 
                                                       then irrefutableLetToSimpleLet (ELCLet pat (simplifyAllLetsInternal i bind) (simplifyAllLetsInternal i body))
                                                       else conformalityTransform i (ELCLet pat (simplifyAllLetsInternal i bind) (simplifyAllLetsInternal i body))
-simplifyAllLetsInternal i t@(ELCLetRec bs body) = (irrefutableLetRecToIrrefutableLet . (conformalityTransform i) . dependencyAnalysis) (ELCLetRec (map (\(p,b) -> (p, simplifyAllLetsInternal i b)) bs) (simplifyAllLetsInternal i body))
+simplifyAllLetsInternal i t@(ELCLetRec bs body) = (irrefutableLetRecToIrrefutableLet . conformalityTransform i . dependencyAnalysis) (ELCLetRec (map (\(p,b) -> (p, simplifyAllLetsInternal i b)) bs) (simplifyAllLetsInternal i body))
                                                      
 simplifyAllLetsInternal i (ELCFatBar t1 t2) = ELCFatBar (simplifyAllLetsInternal i t1) (simplifyAllLetsInternal i t2)
 simplifyAllLetsInternal i (ELCCase var cs) = ELCCase var (map (simplifyAllLetsClause i) cs) --case statement for executing code based on what constructor the input was constructed with.
 simplifyAllLetsInternal i x = x
 
 irrefutableLetRec :: ConstructorInfo -> ELC -> Bool
-irrefutableLetRec i (ELCLetRec bs body) = if all (irrefutable i) (map fst bs)
-                                             then True
-                                             else False
-
+irrefutableLetRec i (ELCLetRec bs body) = all (irrefutable i) (map fst bs)
+                                             
 simplifyAllLetsClause :: ConstructorInfo -> Clause -> Clause                                             
 simplifyAllLetsClause i (CLAUSE c vars term) = CLAUSE c vars $ simplifyAllLets i term
 ------------------------------------------------------------
@@ -305,15 +301,15 @@ constructDigraph bindings = graphFromVerticesAndAdjacency vertices edges
                             where ps = map fst bindings
                                   bs = map snd bindings
                                   vertices = [(binding, hash binding) | binding <- bindings]
-                                  edges = [(hash binding, out) | binding <- bindings, out <- (outEdges binding)] 
+                                  edges = [(hash binding, out) | binding <- bindings, out <- outEdges binding] 
                                    where varsToHashes = concatMap varsToHash bindings --keyed collection of variable names to the binding they are bound in
                                          varsToHash binding@(pat, elc) = [(var, hash binding)| var <- varsInPattern pat]  
-                                         outEdges binding@(pat, elc) = map fromJust $ map ((flip lookup) varsToHashes) $ (freeVarsELC elc :: [Variable])
+                                         outEdges binding@(pat, elc) = map (fromJust . flip lookup varsToHashes) $ freeVarsELC elc
 
 --topologically sorted strongly connected components of the graph, as a list of lists.
 --later elements depend on earlier ones. Thus, the first ones should be in the outermost let.
 topoSortedSCCs :: Graph ((Pattern, ELC), Int) -> [[(Pattern,ELC)]]
-topoSortedSCCs g = map (map fst) $ map flattenSCC $ stronglyConnCompG g
+topoSortedSCCs g = map (map fst . flattenSCC) $ stronglyConnCompG g
 
 --generateSortedLets takes the output of topoSortedSCCs, and an innermost expression, and
 --generates nested let(rec) statements that are in order of their inter-dependencies
@@ -355,7 +351,7 @@ convertBinding p b = ELCLet (PatternVar q) b $ ELCFatBar (ELCApp (ELCAbs p (fold
 irrefutableLetRecToIrrefutableLet :: ELC -> ELC 
 irrefutableLetRecToIrrefutableLet = y_ify . productify
   where productify (ELCLetRec bs t) = ELCLetRec [(PatternConstructor "irrefutableLetRecProduct" $ map PatternVar vs, foldl ELCApp constructor (map ELCVar vs))] t
-          where vs = map toVar $ map fst bs
+          where vs = map (toVar . fst) bs
                       where toVar (PatternVar x) = x
                             toVar _ = error "refutable letrec passed to irrefutableLetRecToIrrefutableLet"
                 constructor = ELCConstant (C.PACK_PRODUCT (length vs))
@@ -365,7 +361,7 @@ irrefutableLetRecToIrrefutableLet = y_ify . productify
 irrefutableLetToSimpleLet :: ELC -> ELC
 irrefutableLetToSimpleLet t@(ELCLet (PatternVar x) binding body) = t --already simple
 irrefutableLetToSimpleLet (ELCLet (PatternConstructor c ps) binding body) = ELCLet (PatternVar q) binding $ recurseLets ps (ELCVar q)
-    where q = head $ variables \\ (freeVarsELC body)
+    where q = head $ variables \\ freeVarsELC body
           recurseLets [] q = body
           recurseLets (pat:pats) q = ELCLet pat (ELCApp (ELCConstant (C.SEL (length ps - length pats))) q) (recurseLets pats q) 
 

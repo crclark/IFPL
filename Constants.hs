@@ -31,10 +31,13 @@ data Constant   = ConstantApp Constant Constant
                   | CHAR Char
                   | BOOL Bool
                   | FAIL --for pattern matches
-                  | UNPACK_SUM Int Int --first int is id tag for constructor, second is arity
+                  | UNPACK_SUM Int Int --first int is id tag for constructor (number from ONE), second is arity
                   | PACK_SUM Int Int
                   | UNPACK_PRODUCT Int --int is arity
                   | PACK_PRODUCT Int --todo: not that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
+                  --todo: implement evaluation for following two in LC.hs
+                  | SEL Int -- extracts the nth element of a product. todo: make sure indexing is consistent. Start with 1 like the book. 
+                  | CASE_T --for sum types in case expressions.  "selects one of its n arguments depending on the constructor used to build its first argument (p. 123)" 
                      deriving (Show, Read, Eq, Ord)
 
 --constantSmallStep does one step of evaluation. To eval completely, use eval.

@@ -23,7 +23,6 @@ data Constant   = ConstantApp Constant Constant
                   | MOD
                   | CONS
                   | NIL
-                  | COND
                   | AND
                   | OR
                   | NOT
@@ -35,9 +34,10 @@ data Constant   = ConstantApp Constant Constant
                   | PACK_SUM Int Int
                   | UNPACK_PRODUCT Int --int is arity
                   | PACK_PRODUCT Int --todo: not that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
-                  --todo: implement evaluation for following two in LC.hs
                   | SEL Int -- extracts the nth element of a product. todo: make sure indexing is consistent. Start with 1 like the book. 
-                  | CASE_T --for sum types in case expressions.  "selects one of its n arguments depending on the constructor used to build its first argument (p. 123)" 
+                  | CASE_T Int --for sum types in case expressions. Int is how many cases it is switching between, so that it can be translated into a lambda expression that takes n arguments and returns the ith. "selects one of its n arguments depending on the constructor used to build its first argument (p. 123)" 
+                  | FATBAR --for fatbar in lambda calculus
+                  | NULL_PACK_ARG --for nullary constructors, to simplify LC reduction function. ALL nullary pack constructors MUST be applied to this value.
                      deriving (Show, Read, Eq, Ord)
 
 --constantSmallStep does one step of evaluation. To eval completely, use eval.
@@ -66,10 +66,6 @@ constantSmallStep (ConstantApp (ConstantApp DIV x) y) = ConstantApp (ConstantApp
 constantSmallStep (ConstantApp (ConstantApp MOD (INT x)) (INT y)) = INT $ x `mod` y
 --MOD inductive case:
 constantSmallStep (ConstantApp (ConstantApp MOD x) y) = ConstantApp (ConstantApp MOD (constantSmallStep x)) (constantSmallStep y)
---COND base case:
-constantSmallStep (ConstantApp (ConstantApp (ConstantApp COND (BOOL c)) x) y) = if c then x else y
---COND inductive case:
-constantSmallStep (ConstantApp (ConstantApp (ConstantApp COND c) y) z) = ConstantApp (ConstantApp (ConstantApp COND (constantSmallStep c)) y) z
 --AND base case:
 constantSmallStep (ConstantApp (ConstantApp AND (BOOL x)) (BOOL y)) = BOOL $ x && y
 --AND inductive case:
@@ -102,7 +98,6 @@ instance Pretty Constant where
  pretty MOD = "MOD"
  pretty CONS = ":"
  pretty NIL = "[]"
- pretty COND = "COND"
  pretty AND = "AND"
  pretty OR = "OR"
  pretty NOT = "NOT"

@@ -6,15 +6,17 @@ todo: add letrecs to plain LC. IFPL p. 43 says it's more efficient.
 todo: eliminate constructor names earlier in the process so I don't have to deal with them in ELC terms.
 -}
 
+import Prelude hiding (sum)
 import Variables
 import Constants as C
 import LC 
-import Data.List hiding (partition)
+import Data.List hiding (partition, sum)
 import Data.Ord (comparing)
 import Control.Monad
 import Digraph --need to "sudo ghc-pkg expose ghc" for this to compile, now.
 import Data.Hashable
 import Data.Maybe (fromJust)
+import Debug.Trace
 
 --abstract syntax for Enriched Lambda Calculus
 data ELC = ELCConstant C.Constant 
@@ -25,7 +27,7 @@ data ELC = ELCConstant C.Constant
            | ELCLetRec [(Pattern, ELC)] ELC --read as "let these patterns equal the corresponding ELCs in ELC.
            | ELCFatBar ELC ELC --used in pattern matching
            | ELCCase Variable [Clause] --case statement for executing code based on what constructor the input was constructed with.
-           | ELCIf --built-in if statement
+           | ELCIf --built-in if statement. Constants.COND is deprecated.
            | ELCY
             deriving (Show, Read, Ord, Eq)
 
@@ -123,10 +125,11 @@ partition f (x : x' : xs) | f x == f x' = tack x (partition f (x':xs))
 matchVarCon :: Int -> [Variable] ->  ConstructorInfo ->[Equation] -> ELC -> ELC
 matchVarCon k us info qs def | isVar (head qs) = matchVar k us qs def info
                              | isCon (head qs) = matchCon k us qs def info
-                               where matchVar k (u:us) qs def info = match k us [(ps, subst e u v) | (PatternVar v : ps, e) <-qs] def info
-                                     matchCon k (u:us) qs def info = ELCCase u [matchClause c k (u:us) (choose c qs) def info | c <- cs]
+
+matchVar k (u:us) qs def info = match k us [(ps, subst e u v) | (PatternVar v : ps, e) <-qs] def info
+matchCon k (u:us) qs def info = ELCCase u [matchClause c k (u:us) (choose c qs) def info | c <- cs]
                                                                       where cs = otherConstructors info (getCon (head qs))
-                                     choose c qs = [q | q <- qs, getCon q == c]
+choose c qs = [q | q <- qs, getCon q == c]
 
 --internal of match
 matchClause :: Constructor -> Int -> [Variable] -> [Equation] -> ELC -> ConstructorInfo -> Clause
@@ -184,7 +187,7 @@ translateInternal i (ELCLet (PatternVar v) x y) = LCApp (LCAbs v (translateInter
 translateInternal i (ELCAbs (PatternVar v) b) = LCAbs v $ translateInternal i b
 translateInternal i (ELCLet pat x y) = error "non-simple let encountered after simplifyAllLets!"
 translateInternal i (ELCLetRec bindings t) = error "letrec encountered after simplifyAllLets!"
-translateInternal i (ELCFatBar x y) = undefined --todo
+translateInternal i (ELCFatBar x y) = LCApp (LCApp (LCConstant C.FATBAR) (translateInternal i x)) $ translateInternal i y
 translateInternal i t@(ELCCase var cases) = translateCase i t 
 translateInternal i (ELCIf) = LCIf
 translateInternal i (ELCY) = LCY
@@ -200,7 +203,7 @@ translateCase i t@(ELCCase var cases) = if productCase i cases
                                            else translate i $ toCaseT i $ sortCases i t 
 
 toCaseT :: ConstructorInfo -> ELC -> ELC
-toCaseT i (ELCCase var cases) = foldl1 ELCApp $ [ELCConstant C.CASE_T, ELCVar var] ++ 
+toCaseT i (ELCCase var cases) = foldl1 ELCApp $ [ELCConstant (C.CASE_T $ length cases), ELCVar var] ++ 
                                                 [ELCApp (ELCApp (ELCConstant $ C.UNPACK_SUM (tag i c) (arity i c)) (foldr (ELCAbs . PatternVar) body vs)) (ELCVar var) 
                                                  | (CLAUSE c vs body) <- cases]
 
@@ -212,7 +215,7 @@ clauseSumId :: ConstructorInfo -> Clause -> Int
 clauseSumId i (CLAUSE c vs t) = tag i c 
 
 productCase :: ConstructorInfo -> [Clause] -> Bool
-productCase i [CLAUSE c _ _] = not $ isSum i c
+productCase i (CLAUSE c _ _ : _) = not $ isSum i c
 
 varsInPattern :: Pattern -> [Variable]
 varsInPattern (PatternConstant _) = []
@@ -242,7 +245,7 @@ freeVarsELC (ELCLetRec bindings term) = nub (freeVarsInBindings ++ freeVarsELC t
 freeVarsELC (ELCFatBar x y) = nub $ freeVarsELC x ++ freeVarsELC y
 freeVarsELC (ELCCase v cs) = nub (concatMap freeVarsInClause cs) \\ [v]
 freeVarsELC ELCIf = []
-
+freeVarsELC ELCY = []
 
 --boundVarsELC returns the bound vars in a given ELC term
 boundVarsELC :: ELC -> [Variable]
@@ -349,13 +352,15 @@ convertBinding p b = ELCLet (PatternVar q) b $ ELCFatBar (ELCApp (ELCAbs p (fold
                
 --irrefutableLetRecToIrrefutableLet does as the clunky name implies. todo: find a better name.
 irrefutableLetRecToIrrefutableLet :: ELC -> ELC 
-irrefutableLetRecToIrrefutableLet = y_ify . productify
+irrefutableLetRecToIrrefutableLet t@(ELCLetRec p q) = (y_ify . productify) t
   where productify (ELCLetRec bs t) = ELCLetRec [(PatternConstructor "irrefutableLetRecProduct" $ map PatternVar vs, foldl ELCApp constructor (map ELCVar vs))] t
           where vs = map (toVar . fst) bs
                       where toVar (PatternVar x) = x
                             toVar _ = error "refutable letrec passed to irrefutableLetRecToIrrefutableLet"
                 constructor = ELCConstant (C.PACK_PRODUCT (length vs))
         y_ify (ELCLetRec [(pat, binding)] body) = ELCLet pat (ELCApp ELCY (ELCAbs pat binding)) body
+irrefutableLetRecToIrrefutableLet t@(ELCLet _ _ _) = t
+irrefutableLetRecToIrrefutableLet x = error "non let(rec) passed to irrefutableLetRecToIrrefutableLet"
 
 --irrefutableLetToSimpleLet does what it says.
 irrefutableLetToSimpleLet :: ELC -> ELC
@@ -398,3 +403,91 @@ testQs = [ ([PatternVar "f", PatternConstructor "Nil" [], PatternVar "ys"], ELCC
          ]
 testMatch :: ELC
 testMatch = match 3 testUs testQs (ELCVar "ERROR!!!") testInfo 
+
+
+-----------------Case statement test------------------
+--type ConstructorInfo = [(TypeName, [(Constructor, (Tag, Arity))])] 
+caseTestInfo :: ConstructorInfo
+caseTestInfo = [("Bool", [("True", (1,0)), ("False", (2,0))])]
+
+--ELCCase Variable [Clause] 
+
+--data Clause = CLAUSE Constructor [Variable] ELC
+clause1 :: Clause
+clause1 = CLAUSE "True" [] $ ELCVar "hello, true!"
+
+clause2 :: Clause
+clause2 = CLAUSE "False" [] $ ELCVar "hello, false!"
+
+caseTest :: ELC
+caseTest = ELCApp (ELCAbs (PatternVar "x") $ ELCCase "x" [clause1, clause2]) $ ELCApp (ELCConstant (C.PACK_SUM 2 0)) (ELCConstant (C.NULL_PACK_ARG))
+
+-----------------letrec test----------------------------
+--ELCLetRec [(Pattern, ELC)] ELC 
+--translation of program on p. 118:
+{-
+letrec  x = fac z
+        fac = \n -> IF (== n 0) 1 (* n (fac (- n 1)))
+        z = 4
+        sum = \x -> \y -> IF (== x 0) y (sum (- x 1) (+ y 1)
+in sum x z
+
+-}
+
+letrecTestInfo :: ConstructorInfo
+letrecTestInfo = undefined
+
+letrecTest :: ELC
+letrecTest = ELCLetRec [(PatternVar "x", ELCApp (ELCVar "fac") (ELCVar "z")),
+                        (PatternVar "fac", fac),
+                        (PatternVar "z", ELCConstant $ C.INT 4),
+                        (PatternVar "sum", sum) 
+                        ]
+                        (ELCApp (ELCApp (ELCVar "sum") (ELCVar "x")) (ELCVar "z"))
+
+fac :: ELC
+fac = ELCApp ELCY $ ELCAbs (PatternVar "f") $ ELCAbs (PatternVar "n") $ ELCApp (ELCApp (ELCApp ELCIf facIf) facThen) facElse
+
+facIf :: ELC
+facIf = ELCApp (ELCApp (ELCConstant C.EQUALS) (ELCVar "n")) (ELCConstant $ C.INT 0)
+
+facThen :: ELC
+facThen = ELCConstant $ C.INT 1
+
+facElse :: ELC
+facElse = ELCApp (ELCApp (ELCConstant C.MULT) (ELCVar "n")) (ELCApp (ELCVar "f") nMinusOne)
+           where nMinusOne = (ELCApp (ELCApp (ELCConstant C.MINUS) (ELCVar "n")) (ELCConstant $ C.INT 1))
+
+sum :: ELC
+sum = ELCApp ELCY $ ELCAbs (PatternVar "f") $ ELCAbs (PatternVar "x") $ ELCAbs (PatternVar "y") $ ELCApp (ELCApp (ELCApp ELCIf sumIf) sumThen) sumElse
+           
+sumIf :: ELC
+sumIf = ELCApp (ELCApp (ELCConstant C.EQUALS) (ELCVar "x")) (ELCConstant $ C.INT 0)
+
+sumThen :: ELC
+sumThen = ELCVar "y"
+
+sumElse :: ELC
+sumElse = ELCApp (ELCApp (ELCVar "f") xMinusOne) yPlusOne
+           where xMinusOne = ELCApp (ELCApp (ELCConstant C.MINUS) (ELCVar "x")) (ELCConstant $ C.INT 1)
+                 yPlusOne = ELCApp (ELCApp (ELCConstant C.PLUS) (ELCVar "y")) (ELCConstant $ C.INT 1)
+
+
+--------letrectest2----------Should eval to 49
+letrecTest2Info :: ConstructorInfo
+letrecTest2Info = undefined
+
+{-
+let x = y + 2
+    y = 5
+    in x * x
+-}
+letrecTest2 :: ELC
+letrecTest2 = ELCLetRec [(PatternVar "x", ELCApp (ELCApp (ELCConstant C.PLUS) (ELCVar "y")) (ELCConstant $ C.INT 2)),
+                         (PatternVar "y", ELCConstant $ C.INT 5)
+                        ]
+                        (ELCApp (ELCApp (ELCConstant C.MULT) (ELCVar "x")) (ELCVar "x"))
+
+--todo: more nullary constructor testing. Packing, unpacking, use as patterns, etc.
+
+--todo: write a plausible function with a pattern match failure

@@ -5,7 +5,7 @@ functional language and the compiled/interpreted code.
 todo: add letrecs to plain LC. IFPL p. 43 says it's more efficient.
 todo: eliminate constructor names earlier in the process so I don't have to deal with them in ELC terms.
 -}
-
+module ELC where
 import Prelude hiding (sum)
 import Variables
 import Constants as C
@@ -422,7 +422,7 @@ clause2 = CLAUSE "False" [] $ ELCVar "hello, false!"
 caseTest :: ELC
 caseTest = ELCApp (ELCAbs (PatternVar "x") $ ELCCase "x" [clause1, clause2]) $ ELCApp (ELCConstant (C.PACK_SUM 2 0)) (ELCConstant (C.NULL_PACK_ARG))
 
------------------letrec test----------------------------
+-----------------letrec test--Should eval to 28--------------------------
 --ELCLetRec [(Pattern, ELC)] ELC 
 --translation of program on p. 118:
 {-

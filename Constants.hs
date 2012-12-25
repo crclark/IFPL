@@ -20,6 +20,7 @@ data Constant   = ConstantApp Constant Constant
                   | MINUS
                   | MULT
                   | DIV
+                  | EXP --todo: implement
                   | MOD
                   | CONS
                   | NIL
@@ -27,6 +28,7 @@ data Constant   = ConstantApp Constant Constant
                   | OR
                   | NOT
                   | INT Int
+                  | DOUBLE Double --todo: implement
                   | CHAR Char
                   | BOOL Bool
                   | FAIL --for pattern matches

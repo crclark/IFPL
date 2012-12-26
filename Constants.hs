@@ -22,6 +22,8 @@ data Constant   = ConstantApp Constant Constant
                   | DIV
                   | EXP --todo: implement
                   | MOD
+                  | GT --todo: implement
+                  | LT --todo: implement
                   | CONS
                   | NIL
                   | AND
@@ -35,7 +37,7 @@ data Constant   = ConstantApp Constant Constant
                   | UNPACK_SUM Int Int --first int is id tag for constructor (number from ONE), second is arity
                   | PACK_SUM Int Int
                   | UNPACK_PRODUCT Int --int is arity
-                  | PACK_PRODUCT Int --todo: not that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
+                  | PACK_PRODUCT Int --todo: note that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
                   | SEL Int -- extracts the nth element of a product. todo: make sure indexing is consistent. Start with 1 like the book. 
                   | CASE_T Int --for sum types in case expressions. Int is how many cases it is switching between, so that it can be translated into a lambda expression that takes n arguments and returns the ith. "selects one of its n arguments depending on the constructor used to build its first argument (p. 123)" 
                   | FATBAR --for fatbar in lambda calculus

@@ -13,7 +13,7 @@ data Expr = ExprConstant C.Constant
 
 type Identifier = String
 
-data Def = Def Identifier [(Pattern, Expr)]
+data Def = Def Identifier [([Pattern], Expr)] --function name, then a bunch of cases for different patterns. List of patterns for each case to accommodate n-ary functions.
      deriving (Show, Read, Eq, Ord)
 
 --todo: support kinds other than *. Should only need to change front-end implementation.

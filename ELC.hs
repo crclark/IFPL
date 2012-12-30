@@ -77,7 +77,7 @@ type ConstructorTags = [(Constructor, Int)]
 tag :: ConstructorInfo -> Constructor -> Int
 tag info c = case lookup c (join (map snd info)) of
              Just (t, a) -> t
-             Nothing -> error "Tried to get tag of non-existent constructor"
+             Nothing -> error $ "Tried to get tag of non-existent constructor:" ++ c
 
 --true iff constructor is of a sum type
 isSum :: ConstructorInfo -> Constructor -> Bool
@@ -86,7 +86,7 @@ isSum info c = not $ tag info c == -1
 --looks up the arity of a constructor
 arity :: ConstructorInfo -> Constructor -> Arity
 arity info constructor = case lookup constructor (join (map snd info)) of
-                         Just (t, a) -> t
+                         Just (t, a) -> a
                          Nothing -> error $ "Unknown constructor referenced in pattern match: " ++ constructor
 
 --todo: verify that two types can't share a constructor name in legal Haskell/Miranda/whatever
@@ -167,9 +167,14 @@ subst ELCIf _ _ = ELCIf
 substC :: Clause -> Variable -> Variable -> Clause
 substC (CLAUSE constructor vars t) var1 var2 = CLAUSE constructor (map (\x -> if x == var2 then var1 else x) vars) (subst t var1 var2) 
 
---translation function from ELC to LC. todo: finish
+--recurseOn handles named self-recursion by abstracting out the function's use of its own name and 
+--applying the fixpoint combinator to the result.
+recurseOn :: Variable -> ELC -> ELC
+recurseOn var body = ELCApp ELCY $ ELCAbs (PatternVar var) body
+
+--translation function from ELC to LC. 
 translate :: ConstructorInfo -> ELC -> LC
-translate i = translateInternal i . simplifyAllLets i
+translate i = translateInternal i . simplifyAllLets i . subConstructorNames i
 
 --translateInternal handles the steps of translation AFTER simplification of let statements
 translateInternal :: ConstructorInfo -> ELC -> LC 
@@ -229,7 +234,29 @@ freeVarsInClause (CLAUSE c vs t) = freeVarsELC t \\ vs
 boundVarsInClause :: Clause -> [Variable]
 boundVarsInClause (CLAUSE c vs t) = nub $ [v | v <- vs, v `elem` (freeVarsELC t)] ++ boundVarsELC t
 
---ELCELCELCfreeVars returns the free variables in a given ELC term
+--subConstructorNames takes a constructor info and a term and replaces all named instances of constructors in that term with their internal representations.
+subConstructorNames :: ConstructorInfo -> ELC -> ELC
+subConstructorNames i (ELCVar v) = if capitalized v 
+                                      then if arity i v == 0
+                                              then if isSum i v
+                                                      then ELCApp (ELCConstant $ C.PACK_SUM (tag i v) 0) $ ELCConstant C.NULL_PACK_ARG
+                                                      else ELCApp (ELCConstant $ C.PACK_PRODUCT (tag i v)) $ ELCConstant C.NULL_PACK_ARG
+                                              else if isSum i v
+                                                      then ELCConstant $ C.PACK_SUM (tag i v) (arity i v)
+                                                      else ELCConstant $ C.PACK_PRODUCT (arity i v)
+                                      else ELCVar v
+                                       where capitalized (c:cs) = elem c ['A'..'Z']
+subConstructorNames i (ELCApp t1 t2) = ELCApp (subConstructorNames i t1) (subConstructorNames i t2)
+subConstructorNames i (ELCAbs p t) = ELCAbs p (subConstructorNames i t)
+subConstructorNames i (ELCLet p b t) = ELCLet p b (subConstructorNames i t)
+subConstructorNames i (ELCLetRec bs t) = ELCLetRec (zip (map fst bs) (map (subConstructorNames i . snd) bs)) (subConstructorNames i t)
+subConstructorNames i (ELCFatBar t1 t2) = ELCFatBar (subConstructorNames i t1) (subConstructorNames i t2)
+subConstructorNames i (ELCCase v cs) = ELCCase v (map (subConstructorNamesInClause i) cs)
+                                        where subConstructorNamesInClause i (CLAUSE c vs t) = CLAUSE c vs $ subConstructorNames i t
+subConstructorNames i t = t
+  
+        
+--freeVarsELC returns the free variables in a given ELC term
 freeVarsELC :: ELC -> [Variable]
 freeVarsELC (ELCConstant c) = []
 freeVarsELC (ELCVar x) = [x]
@@ -307,8 +334,10 @@ constructDigraph bindings = graphFromVerticesAndAdjacency vertices edges
                                   edges = [(hash binding, out) | binding <- bindings, out <- outEdges binding] 
                                    where varsToHashes = concatMap varsToHash bindings --keyed collection of variable names to the binding they are bound in
                                          varsToHash binding@(pat, elc) = [(var, hash binding)| var <- varsInPattern pat]  
-                                         outEdges binding@(pat, elc) = map (fromJust . flip lookup varsToHashes) $ freeVarsELC elc
-
+                                         outEdges binding@(pat, elc) = map (safeFromJust . flip lookup varsToHashes) $ freeVarsELC elc
+                                         safeFromJust x = case x of
+                                                               Just y -> y
+                                                               Nothing -> error "free variable in body of letrec not found in letrec bindings"
 --topologically sorted strongly connected components of the graph, as a list of lists.
 --later elements depend on earlier ones. Thus, the first ones should be in the outermost let.
 topoSortedSCCs :: Graph ((Pattern, ELC), Int) -> [[(Pattern,ELC)]]

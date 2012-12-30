@@ -1,14 +1,22 @@
+{-
+Like Haskell, kind of, but each declaration ends with a ! and each case of a function ends with a ;
+
+todo: let expressions, if-then-else expressions
+--todo: replace constructor names with internal constructors
+-}
 module Parser where
 
 import LangAST
-import ELC (Constructor, TypeName, Pattern(..))
+import ELC (ELC, Constructor, ConstructorInfo, TypeName, Pattern(..))
 import Text.Parsec
 import Text.Parsec.String
 import Text.Parsec.Expr
+import Text.Parsec.Token (commentStart)
+import Text.Parsec.Language (haskellDef)
 import Control.Applicative ((<$>), (<*>))
 import Control.Monad.Identity
 import Data.Either (partitionEithers)
-import Text.Parsec.Language (haskellDef)
+import Data.List (intercalate)
 import qualified Text.Parsec.Token as P
 import Constants as C
 
@@ -16,6 +24,12 @@ lexer = P.makeTokenParser haskellDef
 
 identifier =P.identifier lexer
 
+capIdentifier :: Parser String
+capIdentifier = do init <- oneOf ['A'..'Z']
+                   rest <- identifier
+                   return $ init:rest
+                   <?> "Capitalized identifier"
+                   
 reserved = P.reserved lexer
 
 operator = P.operator lexer
@@ -70,10 +84,22 @@ commaSep = P.commaSep lexer
 
 commaSep1 = P.commaSep1 lexer
 
---a program is a line-break separated list of declarations. Going to require that each decl is separated by one or more blank lines
+fromEither :: Show a => Either a b -> b
+fromEither (Left x) = error $ show x
+fromEither (Right x) = x
 
+
+fileToELC :: String -> (ELC, ConstructorInfo)
+fileToELC s = (expr, info)
+               where (funcs, adts) = case runParser program () [] s of
+                                      Left e -> error $ show e
+                                      Right tuple -> tuple
+                     info = buildConstructorInfo adts
+                     expr = defsToELC funcs
+
+--a program is a bang separated list of declarations. 
 program :: Parser ([Def],[ADTDef])
-program = partitionEithers <$> sepBy decl (string "\n\n") --todo: using symbol instead of string consumes trailing whitespace; is that what I want here? 
+program = partitionEithers <$> endBy1 decl (symbol "!") 
 
 --a declaration is either a ADT type def or a function def (constants are nullary functions)
 decl :: Parser (Either Def ADTDef)
@@ -88,19 +114,19 @@ decl = do adt <- optionMaybe adtDecl
 --an ADT type def is "data" ++a type name ++ "=" ++ a pipe-separated list of data constructors + their arg types
 adtDecl :: Parser ADTDef
 adtDecl = do symbol "data"
-             ident <- identifier
+             ident <- capIdentifier
              symbol "="
-             clauses <- sepBy dataConstructorClause (symbol "|") 
+             clauses <- sepBy dataConstructorClause (symbol "|")
              return $ ADTDef ident clauses
              
 dataConstructorClause :: Parser (Constructor, [TypeName])
-dataConstructorClause = do ident <- identifier
-                           typeNames <- many identifier
+dataConstructorClause = do ident <- capIdentifier
+                           typeNames <- many capIdentifier
                            return (ident, typeNames)
 
 --a function is a line-break separated list of function cases
 funcDecl :: Parser Def
-funcDecl = helper <$> sepBy funcCase (symbol "\n")
+funcDecl = helper <$> endBy funcCase (semi)
 
 helper :: [(Identifier, ([Pattern],Expr))] -> Def
 helper xss@(x:xs) = if all (== (fst x)) (map fst xs)
@@ -147,10 +173,11 @@ table = [
       opify t = \l r -> ExprApp (ExprApp t l) r 
       
 innerExpr :: Parser Expr
-innerExpr = skipMany (symbol " ") >> (lexeme $ foldl1 ExprApp <$> many1 unit) <?> "subexpression that goes on either side of an infix operator"
+innerExpr = whiteSpace >> lexeme (foldl1 ExprApp <$> many1 unit) <?> "subexpression that goes on either side of an infix operator"
 
 unit :: Parser Expr
 unit = (lexeme $ parens (prefixOp <|> rhsExpr) <|> literal <|> ident) <?> "expression"
+
 
 literal :: Parser Expr --todo: add list and string sugar and list comprehensions
 literal = numLit <|> charLit <?> "literal"

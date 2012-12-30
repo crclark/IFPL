@@ -40,7 +40,6 @@ data Constant   = ConstantApp Constant Constant
                   | PACK_PRODUCT Int --todo: note that this pack/unpack scheme does not bear type info, so the languages we implement need to be statically typed
                   | SEL Int -- extracts the nth element of a product. todo: make sure indexing is consistent. Start with 1 like the book. 
                   | CASE_T Int --for sum types in case expressions. Int is how many cases it is switching between, so that it can be translated into a lambda expression that takes n arguments and returns the ith. "selects one of its n arguments depending on the constructor used to build its first argument (p. 123)" 
-                  | FATBAR --for fatbar in lambda calculus
                   | NULL_PACK_ARG --for nullary constructors, to simplify LC reduction function. ALL nullary pack constructors MUST be applied to this value.
                      deriving (Show, Read, Eq, Ord)
 

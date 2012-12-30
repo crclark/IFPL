@@ -18,6 +18,7 @@ data LC = LCConstant C.Constant
           | LCY
           | LCIf --COND deprecated
           | LCADT Int [LC] --Int is sum constructor tag todo: consider replacing this with Church-encoded data structures, just because that's more fun.
+          | LCFATBAR [LC] --For ease of evaluation. FAIL not included in list. See smallStep case for this-- it's quite straight-forward.
           deriving (Show, Read, Ord, Eq)
 
 instance Pretty LC where
@@ -40,6 +41,7 @@ freeVars (LCAbs var body) = delete var $ freeVars body
 freeVars LCY = []
 freeVars LCIf = []
 freeVars (LCADT _ ts) = nub $ concatMap freeVars ts
+freeVars (LCFATBAR ts) = nub $ concatMap freeVars ts
 
 --boundVars returns the bound vars in a given lambda calculus term
 boundVars :: LC -> [Variable]
@@ -49,7 +51,7 @@ boundVars (LCApp x y) = nub $ boundVars x ++ boundVars y
 boundVars (LCAbs var body) = if var `elem` (freeVars body) 
                                 then var : boundVars body
                                 else boundVars body
-
+boundVars (LCFATBAR ts) = nub $ concatMap freeVars ts
 --one step of leftmost outermost reduction
 smallStep :: LC -> LC
 
@@ -96,7 +98,7 @@ smallStep (LCApp
                            then LCApp (LCConstant (C.PACK_SUM d0 (arity - 1))) (LCADT d1 (xs ++ [term]))
                            else LCADT d1 (xs ++ [term])
                            
---last step of packing. All that's left is a used-up pack statement of arity 0. todo: what if it is supposed to be arity 0? Make sure that case works right.
+--last step of packing. All that's left is a used-up pack statement of arity 0. 
 smallStep (LCApp (LCConstant (C.PACK_SUM _ 0)) adt@(LCADT d xs)) = adt
 
 --first step of packing. No partially applied ADT present yet.
@@ -108,7 +110,7 @@ smallStep (LCApp (LCConstant (C.PACK_PRODUCT 0)) (LCConstant C.NULL_PACK_ARG)) =
 smallStep (LCApp (LCApp (LCConstant (C.PACK_PRODUCT arity)) (LCADT _ xs)) term) = if arity > 1 
                                                                                         then LCApp (LCConstant (C.PACK_PRODUCT (arity - 1))) (LCADT (-1) (xs ++ [term]))
                                                                                         else LCADT (-1) (xs ++ [term])
---todo: same as todo for the analogous pattern-match for PACK_SUM
+
 smallStep (LCApp (LCConstant (C.PACK_PRODUCT 0)) adt@(LCADT d xs)) = adt
 
 smallStep (LCApp (LCConstant (C.PACK_PRODUCT arity)) term) = LCApp (LCConstant (C.PACK_PRODUCT (arity - 1))) (LCADT (-1) [term])
@@ -117,10 +119,17 @@ smallStep (LCApp (LCConstant (C.PACK_PRODUCT arity)) term) = LCApp (LCConstant (
 smallStep (LCApp (LCConstant x) (LCConstant y)) = LCConstant $ C.ConstantApp x y
 
 --FATBAR reduction rules:
+{-
 smallStep (LCApp (LCApp (LCConstant C.FATBAR) (LCConstant C.FAIL)) b) = b
 
 smallStep (LCApp (LCApp (LCConstant C.FATBAR) a) b) = a
+-}
+smallStep (LCApp (LCFATBAR ts) adt@(LCADT i cs)) = if null successes then LCConstant C.FAIL else head successes
+                                                    where evaledTs = map (\t -> eval $ LCApp t adt) ts 
+                                                          successes = filter (/= LCConstant C.FAIL) evaledTs
 
+smallStep (LCApp f@(LCFATBAR ts) t) = LCApp f (smallStep t)
+                                                         
 --SEL reduction rule:
 smallStep (LCApp (LCConstant (C.SEL n)) (LCADT _ xs)) = xs !! n
 

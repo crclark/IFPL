@@ -192,10 +192,15 @@ translateInternal i (ELCLet (PatternVar v) x y) = LCApp (LCAbs v (translateInter
 translateInternal i (ELCAbs (PatternVar v) b) = LCAbs v $ translateInternal i b
 translateInternal i (ELCLet pat x y) = error "non-simple let encountered after simplifyAllLets!"
 translateInternal i (ELCLetRec bindings t) = error "letrec encountered after simplifyAllLets!"
-translateInternal i (ELCFatBar x y) = LCApp (LCApp (LCConstant C.FATBAR) (translateInternal i x)) $ translateInternal i y
+translateInternal i t@(ELCFatBar x y) = LCFATBAR $ translateFatBarInternal i t--LCApp (LCApp (LCConstant C.FATBAR) (translateInternal i x)) $ translateInternal i y
 translateInternal i t@(ELCCase var cases) = translateCase i t 
 translateInternal i (ELCIf) = LCIf
 translateInternal i (ELCY) = LCY
+
+--translates ELC fatbars into list of LC statements corresponding to each fatbar case, excluding FAIL.
+translateFatBarInternal :: ConstructorInfo -> ELC -> [LC]
+translateFatBarInternal i (ELCFatBar x (ELCConstant C.FAIL)) = [translateInternal i x]
+translateFatBarInternal i (ELCFatBar x y) = (translateInternal i x) : translateFatBarInternal i y
 
 --translates case expressions
 --CLAUSE Constructor [Variable] ELC

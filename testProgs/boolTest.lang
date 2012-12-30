@@ -1,0 +1,163 @@
+data Bool = True | False
+!
+
+data BoolTuple = BT Bool Bool
+!
+
+fst (BT x y) = x;
+!
+
+snd (BT x y) = y;
+!
+
+not (True) = False;
+not (False) = True;
+!
+
+fromBool (True) = 1;
+fromBool (False) = 0;
+!
+
+main = fromBool (fst (BT True False)); --evals to 1
+!
+
+{-
+
+letrec
+   not = (\True -> PACK_SUM 2 0 NULL_PACK_ARG) FATBAR (\False -> PACK_SUM 1 0 NULL_PACK_ARG)
+         FATBAR FAIL
+   fromBool =  (\True -> 1) FATBAR (\False -> 0) FATBAR FAIL
+   
+in fromBool (not (PACK_SUM 1 0 NULL_PACK_ARG))
+
+
+----->
+
+let fromBool = (\True -> 1) FATBAR (\False -> 0) FATBAR FAIL
+
+in let not = (\True -> PACK_SUM 2 0 NULL_PACK_ARG) FATBAR (\False -> PACK_SUM 1 0 NULL_PACK_ARG)
+             FATBAR FAIL
+        in fromBool (not (PACK_SUM 1 0 NULL_PACK_ARG))
+        
+----->
+
+(\fromBool -> (\not -> fromBool (not (PACK_SUM 1 0 NULL_PACK_ARG))) 
+
+(LCApp (LCApp (LCConstant FATBAR) (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG)))) (LCApp (LCApp (LCConstant FATBAR) (LCApp (LCConstant (UNPACK_SUM 2 0)) (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG)))) (LCConstant FAIL)))))
+etc.
+
+---------
+fromBool is translated as lambda calculus to the following apparently nonsensical term:
+Find out why and fix it if broken. UPDATE: WORKS CORRECTLY.
+
+(LCApp (LCApp (LCConstant FATBAR) 
+              (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                     (LCConstant (INT 1)))) 
+       (LCApp (LCApp (LCConstant FATBAR) 
+                     (LCApp (LCConstant (UNPACK_SUM 2 0)) 
+                            (LCConstant (INT 0)))) 
+              (LCConstant FAIL)))
+
+fromBool is translated thus when "not" is removed from the program and main = fromBool True: 
+(this program evaluates correctly)
+
+
+(LCApp 
+      (LCApp (LCConstant FATBAR) 
+             (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                    (LCConstant (INT 1)))) 
+      (LCApp (LCApp (LCConstant FATBAR) 
+                    (LCApp 
+                          (LCConstant (UNPACK_SUM 2 0)) 
+                          (LCConstant (INT 0)))) 
+             (LCConstant FAIL)))
+
+THUS: the problem is in the evaluator. Obviously the two beta reductions that put fromBool and not
+in place must work (or else no programs would work at all), so the problem must be in the 
+small step reduction rules for packing and fatbar. 
+
+The program looks like this after fromBool and not are substituted in:
+
+LCApp (LCApp (LCApp (LCConstant FATBAR) --fromBool
+                    (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1)))) 
+             (LCApp (LCApp (LCConstant FATBAR) 
+                           (LCApp (LCConstant (UNPACK_SUM 2 0)) (LCConstant (INT 0)))) 
+                    (LCConstant FAIL))) 
+      (LCApp (LCApp (LCApp (LCConstant FATBAR) --not
+                           (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                                  (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG)))) 
+                    (LCApp (LCApp (LCConstant FATBAR) 
+                                  (LCApp (LCConstant (UNPACK_SUM 2 0)) 
+                                         (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG)))) 
+                           (LCConstant FAIL))) 
+             (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG))) --True
+
+which is still fromBool (not True)
+
+the next small step results in this:
+
+LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1))) 
+      (LCApp (LCApp (LCApp (LCConstant FATBAR) --not
+                    (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                           (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG)))) 
+                    (LCApp (LCApp (LCConstant FATBAR) 
+                                  (LCApp (LCConstant (UNPACK_SUM 2 0)) 
+                                         (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG)))) 
+                           (LCConstant FAIL))) 
+             (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG)))
+
+Thus, half of fromBool (and its fatbar) were annihilated by an unknown force. This seems like a BUG.
+It may be related to the fact that there is that PACK_SUM 1 0 at the bottom, and it thinks that it will
+inevitably be unpacking that, not taking into account that it may change before then.
+To test this hypothesis, change True to False in main and see if this reduction step leaves behind
+only an UNPACK_SUM 2 0 of fromBool.
+
+next step:
+
+LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1))) 
+      (LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                    (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG))) 
+             (LCApp (LCConstant (PACK_SUM 1 0)) (LCConstant NULL_PACK_ARG)))
+
+Same sort of thing happened: not got chopped down to one of its cases. Suspiciously, it's the case
+that will fire when True gets passed in. 
+
+next:
+
+LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1))) 
+      (LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) 
+                    (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG))) 
+             (LCADT 1 []))
+
+The True value gets packed up.
+
+next:
+
+LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1))) 
+      (LCApp (LCConstant (PACK_SUM 2 0)) (LCConstant NULL_PACK_ARG))
+
+not is applied to the packed ADT and the correct case is chosen.
+
+next:
+LCApp (LCApp (LCConstant (UNPACK_SUM 1 0)) (LCConstant (INT 1))) 
+      (LCADT 2 [])
+
+the False resulting from (not True) is packed up.
+
+last of all:
+LCConstant FAIL
+
+The application of UNPACK_SUM 1 0 to an ADT constructed with sum constructor #2 is, of course,
+a pattern match failure.
+
+CONCLUSION:
+Fatbar reduction is broken. Verified by inspection of LC.smallStep.
+
+ATTEMPTED FIX: Fatbar is now a first-class part of our lambda calculus implementation.
+To simplify its reduction, it is implemented as LCFATBAR [LC]. Thus, reducing it requires only
+apply its argument to each of the cases in its list of cases (the list of cases excludes FAIL).
+Then, if one of them isn't FAIL, we return it. Otherwise, we FAIL.
+
+New evaluation order for main = fromBool (not True):
+
+-}

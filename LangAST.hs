@@ -3,7 +3,7 @@ module LangAST where
 import ELC --for translation
 import Constants as C
 import Variables
-import Data.List (find)
+import Data.List (find, (\\))
 
 data Expr = ExprConstant C.Constant
             |ExprApp Expr Expr
@@ -36,7 +36,7 @@ exprToELC (ExprLetRec bs t) = ELCLetRec bsTrans $ exprToELC t
 --defToELC translates a def to an ELC expression.
 --note this strips off the definition's name. Make sure it is preserved by the caller.
 defToELC :: Def -> ELC
-defToELC (Def i bs) = if numArgs == 0 
+defToELC (Def _ bs) = if numArgs == 0 
                          then exprToELC $ snd $ head $ bs 
                          else foldr ELCFatBar (ELCConstant C.FAIL) lambdaBs
                        where numArgs = (length . fst . head) bs
@@ -46,9 +46,14 @@ defToELC (Def i bs) = if numArgs == 0
 --defToBinding translates a definition into a function name, function body pair.
 --Also handles explicit self-recursion, as this is a convenient point at which we know the function's name.
 defToBinding :: Def -> (Pattern, ELC)
-defToBinding def = (PatternVar $ defName def, defToELC def)
-                     where body = recurseOn (defName def) $ defToELC def
-
+defToBinding def = (PatternVar $ defName def, body)
+                     where body = let elc = defToELC def in
+                                    let newVar = head $ variables \\ freeVarsELC elc in
+                                      if (defName def) `elem` (freeVarsELC elc)
+                                         then recurseOn newVar (subst elc newVar (defName def))
+                                         else elc
+                           
+  
 --type ConstructorInfo = [(TypeName, [(Constructor, (Tag, Arity))])] 
 buildConstructorInfo :: [ADTDef] -> ConstructorInfo
 buildConstructorInfo = concatMap inner  

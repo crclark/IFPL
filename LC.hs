@@ -120,15 +120,19 @@ smallStep (LCApp (LCConstant x) (LCConstant y)) = LCConstant $ C.ConstantApp x y
 
 --FATBAR reduction rules:
 {-
-smallStep (LCApp (LCApp (LCConstant C.FATBAR) (LCConstant C.FAIL)) b) = b
-
-smallStep (LCApp (LCApp (LCConstant C.FATBAR) a) b) = a
--}
 smallStep (LCApp (LCFATBAR ts) adt@(LCADT i cs)) = if null successes then LCConstant C.FAIL else head successes
                                                     where evaledTs = map (\t -> eval $ LCApp t adt) ts 
                                                           successes = filter (/= LCConstant C.FAIL) evaledTs
-
 smallStep (LCApp f@(LCFATBAR ts) t) = LCApp f (smallStep t)
+-}
+smallStep (LCApp (LCFATBAR ts) t) =let evaledTs = map (\x -> eval $ LCApp x t) ts 
+                                       in let successes = filter (/= LCConstant C.FAIL) evaledTs 
+                                             in if isStuck t 
+                                                   then if null successes 
+                                                           then LCConstant C.FAIL 
+                                                           else head successes
+                                                else LCApp (LCFATBAR ts) (smallStep t)
+                                      
                                                          
 --SEL reduction rule:
 smallStep (LCApp (LCConstant (C.SEL n)) (LCADT _ xs)) = xs !! n
@@ -150,13 +154,26 @@ smallStep x = x
 
 --evaluates a term to normal form
 eval :: LC -> LC
-eval = until (\x -> LC.smallStep x == x) LC.smallStep --todo: replace with something faster
+eval = until isStuck LC.smallStep --todo: replace with something faster
+
+isStuck :: LC -> Bool
+isStuck t = smallStep t == t
 
 selectIthFromNArgs :: Int -> Int -> LC
 selectIthFromNArgs i n = foldr LCAbs ith vars
                         where vars = take n variables
                               ith = LCVar $ vars !! (i - 1)
 
+{-
+LCConstant C.Constant
+          | LCVar Variable
+          | LCApp LC LC
+          | LCAbs Variable LC
+          | LCY
+          | LCIf --COND deprecated
+          | LCADT Int [LC] --Int is sum constructor tag todo: consider replacing this with Church-encoded data structures, just because that's more fun.
+          | LCFATBAR [LC] 
+-}
 --substitutes LC term m for free occurrences of x in term. Does alpha conversion as necessary.
 sub :: LC -> Variable -> LC -> LC
 sub m x (LCVar z) = if z == x then m else LCVar z
@@ -166,7 +183,11 @@ sub m x (LCAbs y body) | x == y = LCAbs y body
                        | otherwise = LCAbs z (sub m x (sub (LCVar z) y body))
                             where z = head unusedVars
                                         where unusedVars = variables \\ (freeVars body ++ freeVars m)
-sub m x t = t --catch-all for constant expressions
+sub m x t@(LCConstant _) = t 
+sub m x LCY = LCY
+sub m x LCIf = LCIf
+sub m x t@(LCADT _ _) = t --todo: substitute inside of packed data? Not sure.
+sub m x (LCFATBAR ts) = LCFATBAR $ map (sub m x) ts
 
 --this term does not evaluate to a value
 testTerm :: LC

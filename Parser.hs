@@ -1,8 +1,8 @@
 {-
 Like Haskell, kind of, but each declaration ends with a ! and each case of a function ends with a ;
 
+todo: type variables in data declarations
 todo: let expressions, if-then-else expressions
---todo: replace constructor names with internal constructors
 -}
 module Parser where
 
@@ -166,7 +166,7 @@ table :: [[Operator String () Identity Expr]]
 table = [
       [ op "*" (opify (ExprConstant C.MULT)) AssocLeft, op "/" (opify (ExprConstant C.DIV)) AssocLeft ],
       [ op "+" (opify (ExprConstant C.PLUS)) AssocLeft, op "-" (opify (ExprConstant C.MINUS)) AssocLeft ],
-      [ op "==" (opify (ExprConstant C.EQUALS)) AssocLeft, op "<" (opify (ExprConstant C.LT)) AssocLeft, op ">" (opify (ExprConstant C.GT)) AssocLeft]
+      [ op "==" (opify (ExprConstant C.EQUALS)) AssocLeft, op "<" (opify (ExprConstant C.LESS_THAN)) AssocLeft, op ">" (opify (ExprConstant C.GREATER_THAN)) AssocLeft]
       ]
     where
       op s f assoc = Infix (do { string s ; return f }) assoc
@@ -176,8 +176,16 @@ innerExpr :: Parser Expr
 innerExpr = whiteSpace >> lexeme (foldl1 ExprApp <$> many1 unit) <?> "subexpression that goes on either side of an infix operator"
 
 unit :: Parser Expr
-unit = (lexeme $ parens (prefixOp <|> rhsExpr) <|> literal <|> ident) <?> "expression"
+unit = (lexeme $ conditional <|> parens (prefixOp <|> rhsExpr) <|> literal <|> ident) <?> "expression"
 
+conditional :: Parser Expr
+conditional = do reserved "if"
+                 a <- rhsExpr
+                 reserved "then"
+                 b <- rhsExpr
+                 reserved "else"
+                 c <- rhsExpr
+                 return $ ExprApp (ExprApp (ExprApp ExprIf a) b) c
 
 literal :: Parser Expr --todo: add list and string sugar and list comprehensions
 literal = numLit <|> charLit <?> "literal"
@@ -194,7 +202,7 @@ charLit = ExprConstant . C.CHAR <$> charLiteral
 
 
 prefixOp :: Parser Expr --todo: add cons, and figure out why >> isn't working instead of do blocks
-prefixOp = plusOp <|> divOp <|> subOp <|> multOp <|> expOp <|> eqOp <|> gtOp <|> ltOp  <?> "built-in math operator"
+prefixOp = plusOp <|> divOp <|> subOp <|> multOp <|> eqOp <|> gtOp <|> ltOp  <?> "built-in math operator"
  where plusOp = do symbol "+"
                    return $ ExprConstant C.PLUS
        divOp = do symbol "/" 
@@ -203,14 +211,12 @@ prefixOp = plusOp <|> divOp <|> subOp <|> multOp <|> expOp <|> eqOp <|> gtOp <|>
                   return $ ExprConstant C.MINUS
        multOp = do symbol "*"
                    return $ ExprConstant C.MULT
-       expOp = do symbol "^" 
-                  return $ ExprConstant C.EXP
        eqOp = do string "=="
                  return $ ExprConstant C.EQUALS
        gtOp = do symbol ">"
-                 return $ ExprConstant C.GT
+                 return $ ExprConstant C.GREATER_THAN
        ltOp = do symbol "<"
-                 return $ ExprConstant C.LT
+                 return $ ExprConstant C.LESS_THAN
 ident :: Parser Expr
 ident = ExprVar <$> identifier
 

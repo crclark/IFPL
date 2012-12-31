@@ -20,10 +20,9 @@ data Constant   = ConstantApp Constant Constant
                   | MINUS
                   | MULT
                   | DIV
-                  | EXP --todo: implement
                   | MOD
-                  | GT --todo: implement
-                  | LT --todo: implement
+                  | GREATER_THAN --todo: implement
+                  | LESS_THAN --todo: implement
                   | CONS
                   | NIL
                   | AND
@@ -69,6 +68,14 @@ constantSmallStep (ConstantApp (ConstantApp DIV x) y) = ConstantApp (ConstantApp
 constantSmallStep (ConstantApp (ConstantApp MOD (INT x)) (INT y)) = INT $ x `mod` y
 --MOD inductive case:
 constantSmallStep (ConstantApp (ConstantApp MOD x) y) = ConstantApp (ConstantApp MOD (constantSmallStep x)) (constantSmallStep y)
+--GREATER_THAN base case:
+constantSmallStep (ConstantApp (ConstantApp GREATER_THAN (INT x)) (INT y)) = BOOL $ x > y
+--GREATER_THAN inductive case:
+constantSmallStep (ConstantApp (ConstantApp GREATER_THAN x) y) = ConstantApp (ConstantApp GREATER_THAN (constantSmallStep x)) (constantSmallStep y)
+--LT base case:
+constantSmallStep (ConstantApp (ConstantApp LESS_THAN (INT x)) (INT y)) = BOOL $ x < y
+--LT inductive case: 
+constantSmallStep (ConstantApp (ConstantApp LESS_THAN x) y) = ConstantApp (ConstantApp LESS_THAN (constantSmallStep x)) (constantSmallStep y)
 --AND base case:
 constantSmallStep (ConstantApp (ConstantApp AND (BOOL x)) (BOOL y)) = BOOL $ x && y
 --AND inductive case:

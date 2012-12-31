@@ -480,7 +480,7 @@ letrecTest = ELCLetRec [(PatternVar "x", ELCApp (ELCVar "fac") (ELCVar "z")),
                         (ELCApp (ELCApp (ELCVar "sum") (ELCVar "x")) (ELCVar "z"))
 
 fac :: ELC
-fac = ELCApp ELCY $ ELCAbs (PatternVar "f") $ ELCAbs (PatternVar "n") $ ELCApp (ELCApp (ELCApp ELCIf facIf) facThen) facElse
+fac = recurseOn "f" $ ELCAbs (PatternVar "n") $ ELCApp (ELCApp (ELCApp ELCIf facIf) facThen) facElse
 
 facIf :: ELC
 facIf = ELCApp (ELCApp (ELCConstant C.EQUALS) (ELCVar "n")) (ELCConstant $ C.INT 0)

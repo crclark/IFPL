@@ -182,7 +182,7 @@ translateInternal i (ELCConstant c) = LCConstant c
 translateInternal i (ELCVar v) = LCVar v
 translateInternal i (ELCApp x y) = LCApp (translateInternal i x) (translateInternal i y)
 --Cases for pattern-matching lambda abstractions:
-translateInternal i (ELCAbs (PatternConstant k) body) = LCAbs newVar $ LCApp (LCApp (LCApp LCIf (LCApp (LCApp (LCConstant C.EQUALS) (LCConstant k)) (LCVar "v"))) (translateInternal i body)) (LCConstant C.FAIL)
+translateInternal i (ELCAbs (PatternConstant k) body) = LCAbs newVar $ LCApp (LCApp (LCApp LCIf (LCApp (LCApp (LCConstant C.EQUALS) (LCConstant k)) (LCVar newVar))) {-todo: newVar here was literal "v". Probably a mistake -} (translateInternal i body)) (LCConstant C.FAIL)
                                                  where newVar = head $ variables \\ freeVarsELC body
 translateInternal i (ELCAbs (PatternConstructor c pats) body) = if isSum i c 
                                                          then LCApp (LCConstant (C.UNPACK_SUM (tag i c) (arity i c))) $ translateInternal i $ foldr ELCAbs body pats

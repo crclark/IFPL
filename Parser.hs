@@ -1,8 +1,10 @@
 {-
 Like Haskell, kind of, but each declaration ends with a ! and each case of a function ends with a ;
 
-todo: type variables in data declarations
-todo: let expressions, if-then-else expressions
+todo: type variables in data declarations (i.e., types with kinds other than *)
+todo: let expressions
+todo: string literals in Constants.hs and associated operators for dealing with them.
+      Would make it much easier to define programs with comprehensible output.
 -}
 module Parser where
 
